@@ -40,7 +40,6 @@ public class CatmullRom {
 		Vector3 v1 = (cur - prev).normalized;
 		Vector3 v2 = (next - cur).normalized;
 		Vector3 dir = (Vector3.Cross(Vector3.up, v1) + Vector3.Cross(Vector3.up, v2)).normalized;
-	
 		return cur + dir * amount;
 	}
 }
