@@ -4,18 +4,16 @@ using System.Collections.Generic;
 
 public class TrackGenerator : MonoBehaviour
 {
-	
-	
-	public int numberOfTurns = 40;
 	// Track dimensions (essentially passed from the terrain dimensions)
-	public float areaWidth = 200.0f;
-	public float areaLength = 400.0f;
+	public float areaWidth = 1100.0f;
+	public float areaLength = 2200.0f;
 	// used for the angle of turns
-	public float difficulty = 0.0f;
-	public float steepness = 1.0f;
-	public float trackWidth = 5.0f;
-	public int smoothness = 10;
-
+	public float difficulty = 0.125f;
+	public float numTurns = 10.0f;
+	public int steepness = 2;
+	public float trackWidth = 10.0f;
+	public int smoothness = 2;
+	
 	private float height;
 	private Mesh trackMesh;
 	private Vector3 massCentre;	
@@ -25,45 +23,40 @@ public class TrackGenerator : MonoBehaviour
 	private float innerPaddingWidth;
 	private float innerPaddingLength;
 	// Data for the track
-	private List<Vector3> trackCoords;
-	private List<int> trackIndices;
-
+	private List<Vector3> baseCoords;
+	private List<Vector3> diffCoords;
+	private List<Vector3> meshCoords;
+	
 	// Use this for initialization
 	void Start ()
 	{
-		// Track max height is a ratio between the terrain area and steepness factor
-		// 1 unit is added to avoid z-Fighting but later this will be resolved by merging
-		// the terrain with the track
+		// Track height boundaries based on the area it covers
 		height = ((areaWidth + areaLength) / 50.0f) * steepness;
-
-
-		outerPaddingWidth = areaWidth / 4;
-		outerPaddingLength = areaLength / 4;
-		innerPaddingWidth = areaWidth / 10;
-		innerPaddingLength = areaLength / 10;
+		
+		outerPaddingWidth = areaWidth / 6;
+		outerPaddingLength = areaLength / 6;
+		innerPaddingWidth = areaWidth / 6;
+		innerPaddingLength = areaLength / 6;
 		
 		// Access the Mesh Filter
 		trackMesh = GetComponent<MeshFilter> ().mesh;
 		// And Generate the track
-		GenerateTrack (smoothness, trackWidth);
-	}
-	
-	// Update is called once per frame
-	void Update ()
-	{
 		
+		GenTrackCoords();
+		TrackDifficulty(difficulty);
+		ConstructMesh();
 	}
 	
-	// Generates the track
-	List<Vector3> genTrackCoords ()
+	// Generates the track points
+	private void GenTrackCoords ()
 	{
 		float x, y, z;
 		bool zDirecton;
 		massCentre = new Vector3 ();
+		baseCoords = new List<Vector3>();
 		Vector3 currentCoord;
-		trackCoords = new List<Vector3>();
 		
-		for (int i = 0; i < numberOfTurns; i++) {
+		for (int i = 0; i < numTurns; i++) {
 			// Randomize x
 			x = Random.Range (outerPaddingWidth - areaWidth, areaWidth - outerPaddingWidth);
 			
@@ -81,24 +74,21 @@ public class TrackGenerator : MonoBehaviour
 			// Set a random height of the vertex
 			y = Random.Range (0.0f, height);
 			currentCoord = new Vector3 (x, y, z);
-			trackCoords.Add (currentCoord);
+			baseCoords.Add (currentCoord);
 			
 			// Calculate the mass centre as the track coords are generated
 			massCentre += currentCoord;
 		}
 		// Average the mass centre to get it
-		massCentre /= numberOfTurns;
-		
+		massCentre /= numTurns;
 		
 		// Sort the vertices based on the centre mass and their angle with it
-		trackCoords.Sort (compare);
-		NormalizeHeight();
-		return trackCoords;
+		baseCoords.Sort (compare);
 	}
 	
 	// Helps to order vectors based on their angle with a third one
 	// in this case the centre mass of all vectors
-	int compare (Vector3 p1, Vector3 p2)
+	private int compare (Vector3 p1, Vector3 p2)
 	{
 		// Get the vector from every point to the massCentre
 		// and compare the angles they have
@@ -119,178 +109,224 @@ public class TrackGenerator : MonoBehaviour
 		return (a1 - a2 < 0) ? -1 : 1;
 	}
 	
-	// Simulates the difficulty of the track where 1 is max difficulty
-	void trackDifficulty (float diff)
+	// Simulates the difficulty of the track by displacing points
+	private void TrackDifficulty (float diff)
 	{
-		Vector3 first;
-		Vector3 middle;
-		Vector3 last;
-		int trackSize = numberOfTurns;
-		int mid;
-		int lst;
+		diffCoords = new List<Vector3>();
+		int trackSize = baseCoords.Count;
+		Vector3 prev = baseCoords[trackSize-1];
+		Vector3 cur;
+		Vector3 next;
 		
-		for (int i = 0; i < trackSize; i+=2) {
-			mid = (i + 1) % trackSize;
-			lst = (i + 2) % trackSize;
-			first = trackCoords [i % trackSize];
-			middle = trackCoords [mid];
-			last = trackCoords [lst];
+		for (int i = 0; i < trackSize; i++) {
+			cur  = baseCoords [i % trackSize];
+			next = baseCoords [(i + 1) % trackSize];
 			
-			// Vectors pointing from the minddle point to the first one 
-			// and from the middle point to the one before
-			Vector3 midToFirst = new  Vector3 (first.x - middle.x, first.y - middle.y, first.z - middle.z);
-			Vector3 midToLast = new Vector3 (last.x - middle.x, last.y - middle.y, last.z - middle.z);
-			
-			// This is the midpoint between first and last
-			Vector3 midpoint = (midToLast + midToFirst) / 2;
+			// This is the midpoint between next and previous
+			Vector3 midpoint = (next + prev) / 2.0f;
+			Vector3 curToMidPoint = midpoint - cur;
 			
 			// Translate middle vector - new middle = middle + (midpoint * difficulty)
-			middle = middle + midpoint * (1.0f - diff);
-			trackCoords [mid] = middle;
+			cur = cur + curToMidPoint * (1.0f - diff);
+			prev = cur;
+			diffCoords.Add(cur);
 		}
+		diffCoords.Add(diffCoords[0]);
 	}
 	
-	void GenerateTrack (int smoothFac, float width)
+	private void ConstructMesh ()
 	{
-		// Generate the list
-		trackCoords = genTrackCoords ();
-		trackIndices = new List<int>();
-		
-		// Always normalise the track turns once and then 
-		// use the user specified difficulty to further normalise the track
-		trackDifficulty (0.5f);
-		trackDifficulty (difficulty);
-		
-		
-		// Create the Mesh
-		ConstructMesh (smoothFac, width);
-		
-		// Add the list to the mesh
-		trackMesh.Clear ();
-		trackMesh.vertices = trackCoords.ToArray ();
-		trackMesh.Optimize ();
-		trackMesh.SetIndices (trackIndices.ToArray (), MeshTopology.LineStrip, 0);
-	}
-	
-	void ConstructMesh (int smoothFac, float width)
-	{
-		int ind = 0; 
-		int trackCoordsSize = trackCoords.Count;
-		List<Vector3> vertices = new List<Vector3> ();
-		List<Vector3> meshVertices = new List<Vector3>();
+		trackMesh.Clear();
+		List<Vector2> texCoords = new List<Vector2>();
 		List<int> indices = new List<int> ();
-		Vector3 outer = new Vector3 ();
+		meshCoords = new List<Vector3>();
+		CatmullRom CRS = new CatmullRom(diffCoords);
+		int diffCoordsSize = CRS.pts.Count;
+		float step = 1.0f / (diffCoordsSize * smoothness);
+		float iterator = 0.0f;
 		
-		for (int i = 0; i < trackCoordsSize; i++) {
-			Vector3 previous = trackCoords [(i + trackCoordsSize - 1) % trackCoordsSize];
-			Vector3 current = trackCoords [i % trackCoordsSize];
-			Vector3 next = trackCoords [(i + 1) % trackCoordsSize];
-			
-			vertices.AddRange( MakeHalfCurve(previous, current, next, smoothFac));
+		List<Vector3> outerCoords = new List<Vector3>();
+		List<Vector3> innerCoords = new List<Vector3>();
+		
+		for(int i = 0; i < diffCoordsSize * smoothness; i++)
+		{
+			outerCoords.Add(CRS.DisplaceBy(trackWidth, iterator, step));
+			innerCoords.Add(CRS.Interpolate(iterator));
+			iterator +=step;
+		}
+
+		WeldOverlappingSections(outerCoords, innerCoords);
+//		NormalizeCurveHeight(innerCoords);
+
+		for(int i = 0; i < diffCoordsSize * smoothness; i++)
+		{
+			meshCoords.Add(innerCoords[i]);
+			meshCoords.Add(outerCoords[i]);
+			meshCoords.Add(innerCoords[i]);
+			meshCoords.Add(outerCoords[i]);
+
+			texCoords.Add(new Vector2(0,0));
+			texCoords.Add(new Vector2(1,0));
+			texCoords.Add(new Vector2(0,1));
+			texCoords.Add(new Vector2(1,1));
+
 		}
 		
-		int vertCount = vertices.Count;
-		for (int i = 0; i < vertCount; i+=2) 
-		{
-			Vector3 prev = vertices [(i + vertCount - 1) % vertCount];
-			Vector3 cur = vertices [i];
-			Vector3 next = vertices [(i + 1) % vertCount];
-			
-			Extrusion(prev,ref cur, next, ref outer, width);
-
-			meshVertices.Add(cur);
-			meshVertices.Add(outer);
-
-			
+		int meshCount = meshCoords.Count;
+		for (int i = 0; i < meshCount; i++ )
+		{	
 			// Tri 1
-			indices.Add (ind);
-			indices.Add((ind + 2) % vertCount);
-			indices.Add((ind + 1) % vertCount);
+			indices.Add(i % meshCount);
+			indices.Add((i + 2) % meshCount);
+			indices.Add((i + 1) % meshCount);
 			// Tri 2
-			indices.Add((ind + 2) % vertCount);
-			indices.Add((ind + 3) % vertCount);
-			indices.Add((ind + 1) % vertCount);
-
-			ind += 2;
-		}
+			indices.Add((i + 2) % meshCount);
+			indices.Add((i + 3) % meshCount);
+			indices.Add((i + 1) % meshCount);
+		} 
 		
-		trackCoords = meshVertices;
-		trackIndices = indices;
+		trackMesh.vertices = meshCoords.ToArray();
+		trackMesh.uv = texCoords.ToArray();
+		trackMesh.RecalculateNormals();
+		trackMesh.Optimize ();
+		trackMesh.SetIndices (indices.ToArray (), MeshTopology.Triangles, 0);
 		
 	}
 	
-	// Given three points find the curve 
-	// midpoints is the amount of points
-	public List<Vector3> MakeHalfCurve (Vector3 a, Vector3 b, Vector3 c, int midpoints)
+	private void WeldOverlappingSections(List<Vector3> outerCoords, List<Vector3> innerCoords)
 	{
-		float step = 1.0f / midpoints; 
-		float t = step;
-		List<Vector3> result = new List<Vector3> ();
-		Vector3 temp;
-		Vector3 midAB = (a + b) / 2.0f;
-		Vector3 midBC = (b + c) / 2.0f;
-		Vector3 midB = (b + (midAB + midBC) / 2.0f) / 2.0f;
+		Vector3 ps1;
+		Vector3 pe1;
+		Vector3 ps2;
+		Vector3 pe2;
+		int size = outerCoords.Count;
+		Vector3 contactPoint;
 		
-		result.Add (midAB);
-		for (int i = 0; i < midpoints; i++) {
-			if (t >= 1.0f) {
-				t = 1.0f;
-			}
-			temp = midAB * Mathf.Pow (1.0f - t, 2) + midB * 2 * t * (1.0f - t) + midBC * Mathf.Pow (t, 2);  
-			result.Add (temp);
-			t += step;
-		}
-		result.Add (midBC);
-		return result;
-	}
-	
-	// Displaces the point based on its direction towards the next point and the local space
-	public void Extrusion (Vector3 prev,ref Vector3 cur, Vector3 next, ref Vector3 outer, float amount)
-	{
-		Vector3 dir = Vector3.Cross(next- prev, Vector3.down).normalized;
-		
-		// Get Angle
-		Vector3 toCur = (cur - prev).normalized;
-		Vector3 pastCur = (next - cur).normalized;
-		float angle = Vector3.Angle(toCur , pastCur);
-		Vector3 angleSign = Vector3.Cross(toCur, pastCur).normalized;
-		if(angleSign.y < 0) { angle = -angle; }
-		
-		if(angle > 0)
+		for(int i = 0; i < size; i++)
 		{
-			dir = Quaternion.Euler(0, -angle, 0) * dir; 
-			cur += -dir * amount / 2;
-			outer = cur + dir * amount;
-		}
-		else if (angle < 0) 
-		{
-			dir = Quaternion.Euler(0, -angle, 0) * dir;
-			cur += -dir * amount / 2;
-			outer = cur + dir * amount;
+			ps1 = outerCoords[i];
+			pe1 = outerCoords[(i + 1) % size];
 			
-		}
-		else
-		{
-			cur += -dir * amount / 2;
-			outer = cur + dir * amount;
-		}
-	}
-
-	// Fixes drastic track altitudes
-	public void NormalizeHeight()
-	{
-		int tSize = trackCoords.Count;
-		for(int i = 0 ; i < tSize; i+=2 )
-		{
-			Vector3 prev = trackCoords [(i + tSize - 1) % tSize];
-			Vector3 cur = trackCoords [i];
-			Vector3 next = trackCoords [(i + 1) % tSize];
-
-			cur.y = (prev.y + next.y) / 2.0f;
-			trackCoords[i] = cur;
+			for( int j = i + 2; j < i + 2 + smoothness * 5; j++)
+			{
+				ps2 = outerCoords[j % size];
+				pe2 = outerCoords[(j+1) % size];
+				contactPoint = LineIntersectionPoint(ps1, pe1, ps2, pe2);
+				
+				if(contactPoint != Vector3.zero)
+				{
+					for(int k = i; k < j + 1; k++ )
+					{
+						innerCoords[k % size] = contactPoint + (innerCoords[k % size] - contactPoint).normalized * trackWidth; 
+						outerCoords[k % size] = contactPoint;
+					}
+					i = j - 2;
+					break;
+				}
+			}
 		}
 	}
-
 	
+	
+	private Vector3 LineIntersectionPoint(Vector3 ps1, Vector3 pe1, Vector3 ps2, Vector3 pe2)
+	{
+		// Get A,B,C of first line - points : ps1 to pe1
+		float A1 = pe1.z-ps1.z;
+		float B1 = ps1.x-pe1.x;
+		float C1 = A1*ps1.x+B1*ps1.z;
+		
+		// Get A,B,C of second line - points : ps2 to pe2
+		float A2 = pe2.z-ps2.z;
+		float B2 = ps2.x-pe2.x;
+		float C2 = A2*ps2.x+B2*ps2.z;
+		
+		// Get delta
+		float delta = A1*B2 - A2*B1;
+		// If the lines are not intersecting return zero
+		if(delta == 0.0f) { return Vector3.zero;}
+		float x = (B2 * C1 - B1 * C2) / delta;
+		float z = (A1 * C2 - A2 * C1) / delta;
+		
+		// If the intersection point does not lie within one of the vectors return zero
+		if( x < Mathf.Min(ps1.x, pe1.x) || x > Mathf.Max (ps1.x, pe1.x)) { return Vector3.zero;}
+		if( x < Mathf.Min(ps2.x, pe2.x) || x > Mathf.Max (ps2.x, pe2.x)) { return Vector3.zero;}
+		
+		// now return the Vector3 intersection point
+		return new Vector3(x, (pe1.y + ps2.y) / 2.0f, z);
+	}
+
+	private void NormalizeCurveHeight(List<Vector3> coords)
+	{
+		int size = coords.Count;
+		Vector3 cur;
+		Vector3 prev;
+		Vector3 next;
+		float y;
+		int steep = steepness * 10;
+		while (steep != 0)
+		{
+			for(int i = 0; i < size; i++)
+			{
+				prev = coords[(i - 1 + size) % size ];
+				next = coords[(i + 1) % size ];
+				y = (prev.y + next.y) / 2.0f;
+				cur = coords[i];
+				cur.y = y;
+				coords[i] = cur;
+			}
+			steep--;
+		}
+	}
+	
+	public void ChangeAreaWidth(float width)
+	{
+		areaWidth = width;
+		GenTrackCoords();
+		TrackDifficulty(difficulty);
+		ConstructMesh();
+		
+	}
+	
+	public void ChangeAreaLength(float length)
+	{
+		areaLength = length;
+		GenTrackCoords();
+		TrackDifficulty(difficulty);
+		ConstructMesh();
+	}
+	
+	public void ChangeNumberOfTurns(float newNum)
+	{
+		numTurns = newNum;
+		GenTrackCoords();
+		TrackDifficulty(difficulty);
+		ConstructMesh();
+	}
+	
+	public void ChangeTrackWidth(float width)
+	{
+		trackWidth = width;
+		ConstructMesh();
+	}
+	
+	public void ChangeDifficulty(float diff)
+	{
+		difficulty = diff;
+		TrackDifficulty(difficulty);
+		ConstructMesh();
+	}
+	
+	public void ChangeSmoothness(float smooth)
+	{
+		smoothness = (int)smooth;
+		ConstructMesh();
+	}
+	
+	public void ChangeSteepness(float steep)
+	{
+		height = steep;
+		// CALL HEIGHT CHANGER
+		//		FixAnglesAndHeight(); 
+	}
 }
 

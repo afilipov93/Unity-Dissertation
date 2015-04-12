@@ -47,7 +47,7 @@
   </ItemGroup>
   <ItemGroup>
      <Compile Include="Assets\Scripts\CameraController.cs" />
-     <Compile Include="Assets\Scripts\FPSScript.cs" />
+     <Compile Include="Assets\Scripts\CatmullRomSpline.cs" />
      <Compile Include="Assets\Scripts\TrackGenerator.cs" />
  <Reference Include="UnityEngine.UI">
  <HintPath>D:/Unity3D/Data/UnityExtensions/Unity/GUISystem/4.6.3/UnityEngine.UI.dll</HintPath>
